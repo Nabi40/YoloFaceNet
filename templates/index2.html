@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SFS Attendance Sheet</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+
+    <div class="container mt-5">
+        <h2 class="text-center mb-3">SFS Attendance Sheet</h2>
+
+        <!-- ✅ Search and Filter Options -->
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <input type="text" id="searchName" class="form-control" placeholder="Search by Name">
+            </div>
+            <div class="col-md-4">
+                <input type="date" id="searchDate" class="form-control">
+            </div>
+            <div class="col-md-4">
+                <select id="searchAccuracy" class="form-control">
+                    <option value="">Filter by Accuracy</option>
+                    <option value="90">90%+</option>
+                    <option value="80">80%+</option>
+                    <option value="70">70%+</option>
+                </select>
+            </div>
+        </div>
+
+        <table class="table table-striped table-bordered">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Time</th>
+                    <th>Accuracy</th>
+                </tr>
+            </thead>
+            <tbody id="attendance-body">
+                <!-- Data will be loaded dynamically -->
+            </tbody>
+        </table>
+
+        <!-- Pagination Controls -->
+        <nav>
+            <ul class="pagination justify-content-center">
+                <li class="page-item disabled">
+                    <button class="page-link" id="prevPage">Previous</button>
+                </li>
+                <li class="page-item">
+                    <span class="page-link" id="pageNumber">Page 1</span>
+                </li>
+                <li class="page-item">
+                    <button class="page-link" id="nextPage">Next</button>
+                </li>
+            </ul>
+        </nav>
+    </div>
+
+    <script>
+        let currentPage = 1;
+        const recordsPerPage = 20;
+
+        function fetchAttendance() {
+            fetch("/get_attendance")
+                .then(response => response.json())
+                .then(data => {
+                    const tbody = document.getElementById("attendance-body");
+                    tbody.innerHTML = "";
+
+                    const attendance = data.attendance || [];
+                    const totalPages = Math.ceil(attendance.length / recordsPerPage);
+
+                    if (totalPages === 0) {
+                        document.getElementById("pageNumber").textContent = "No Records Found";
+                        tbody.innerHTML = "<tr><td colspan='4' class='text-center'>No attendance records found.</td></tr>";
+                        return;
+                    }
+
+                    document.getElementById("pageNumber").textContent = `Page ${currentPage} of ${totalPages}`;
+
+                    const start = (currentPage - 1) * recordsPerPage;
+                    const end = start + recordsPerPage;
+                    let paginatedRecords = attendance.slice(start, end);
+
+                    // ✅ Apply Filtering Based on User Input
+                    const nameFilter = document.getElementById("searchName").value.toLowerCase();
+                    const dateFilter = document.getElementById("searchDate").value;
+                    const accuracyFilter = document.getElementById("searchAccuracy").value;
+
+                    paginatedRecords = paginatedRecords.filter(record => {
+                        const recordName = record.name.toLowerCase();
+                        const recordDate = record.time.split(" ")[0]; // Extract date part
+                        const recordAccuracy = parseInt(record.accuracy);
+
+                        return (
+                            (nameFilter === "" || recordName.includes(nameFilter)) &&
+                            (dateFilter === "" || recordDate === dateFilter) &&
+                            (accuracyFilter === "" || recordAccuracy >= parseInt(accuracyFilter))
+                        );
+                    });
+
+                    paginatedRecords.forEach((r) => {
+                        tbody.innerHTML += `<tr>
+                            <td>${r.id}</td>
+                            <td>${r.name}</td>
+                            <td>${r.time}</td>
+                            <td>${r.accuracy}%</td>
+                        </tr>`;
+                    });
+
+                    document.getElementById("prevPage").parentElement.classList.toggle("disabled", currentPage === 1);
+                    document.getElementById("nextPage").parentElement.classList.toggle("disabled", currentPage === totalPages);
+                })
+                .catch((error) => console.error("❌ Error fetching attendance data:", error));
+        }
+
+        // ✅ Pagination Controls
+        document.getElementById("prevPage").addEventListener("click", () => {
+            if (currentPage > 1) {
+                currentPage--;
+                fetchAttendance();
+            }
+        });
+
+        document.getElementById("nextPage").addEventListener("click", () => {
+            fetch("/get_attendance")
+                .then(response => response.json())
+                .then(data => {
+                    const totalPages = Math.ceil(data.attendance.length / recordsPerPage);
+                    if (currentPage < totalPages) {
+                        currentPage++;
+                        fetchAttendance();
+                    }
+                });
+        });
+
+        // ✅ Auto-refresh every 5 seconds
+        setInterval(fetchAttendance, 5000);
+
+        // ✅ Fetch data on initial page load
+        fetchAttendance();
+
+        // ✅ Attach Event Listeners for Filters
+        document.getElementById("searchName").addEventListener("input", fetchAttendance);
+        document.getElementById("searchDate").addEventListener("change", fetchAttendance);
+        document.getElementById("searchAccuracy").addEventListener("change", fetchAttendance);
+    </script>
+
+</body>
+</html>
