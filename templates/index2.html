@@ -14,28 +14,27 @@
         <!-- ✅ Search and Filter Options -->
         <div class="row mb-3">
             <div class="col-md-4">
+                <label for="searchName" class="form-label fw-bold">Search by Name</label>
                 <input type="text" id="searchName" class="form-control" placeholder="Search by Name">
             </div>
             <div class="col-md-4">
-                <input type="date" id="searchDate" class="form-control">
+                <label for="fromDate" class="form-label fw-bold">From Date</label>
+                <input type="date" id="fromDate" class="form-control">
             </div>
             <div class="col-md-4">
-                <select id="searchAccuracy" class="form-control">
-                    <option value="">Filter by Accuracy</option>
-                    <option value="90">90%+</option>
-                    <option value="80">80%+</option>
-                    <option value="70">70%+</option>
-                </select>
+                <label for="toDate" class="form-label fw-bold">To Date</label>
+                <input type="date" id="toDate" class="form-control">
             </div>
         </div>
 
+        <!-- ✅ Attendance Table -->
         <table class="table table-striped table-bordered">
             <thead>
                 <tr>
                     <th>ID</th>
                     <th>Name</th>
                     <th>Time</th>
-                    <th>Accuracy</th>
+                    <th>Image</th> <!-- ✅ Added Image Column -->
                 </tr>
             </thead>
             <tbody id="attendance-body">
@@ -43,7 +42,7 @@
             </tbody>
         </table>
 
-        <!-- Pagination Controls -->
+        <!-- ✅ Pagination Controls -->
         <nav>
             <ul class="pagination justify-content-center">
                 <li class="page-item disabled">
@@ -61,7 +60,7 @@
 
     <script>
         let currentPage = 1;
-        const recordsPerPage = 20;
+        const recordsPerPage = 15;
 
         function fetchAttendance() {
             fetch("/get_attendance")
@@ -87,27 +86,30 @@
 
                     // ✅ Apply Filtering Based on User Input
                     const nameFilter = document.getElementById("searchName").value.toLowerCase();
-                    const dateFilter = document.getElementById("searchDate").value;
-                    const accuracyFilter = document.getElementById("searchAccuracy").value;
+                    const fromDate = document.getElementById("fromDate").value;
+                    const toDate = document.getElementById("toDate").value;
 
                     paginatedRecords = paginatedRecords.filter(record => {
                         const recordName = record.name.toLowerCase();
-                        const recordDate = record.time.split(" ")[0]; // Extract date part
-                        const recordAccuracy = parseInt(record.accuracy);
+                        const recordDate = record.time.split(" ")[0];
 
                         return (
                             (nameFilter === "" || recordName.includes(nameFilter)) &&
-                            (dateFilter === "" || recordDate === dateFilter) &&
-                            (accuracyFilter === "" || recordAccuracy >= parseInt(accuracyFilter))
+                            (fromDate === "" || recordDate >= fromDate) &&
+                            (toDate === "" || recordDate <= toDate)
                         );
                     });
 
                     paginatedRecords.forEach((r) => {
+                        const imageTag = r.image
+                            ? `<img src="data:image/jpeg;base64,${r.image}" class="img-thumbnail" width="80" height="80"/>`
+                            : `<span class="text-muted">No Image</span>`;
+
                         tbody.innerHTML += `<tr>
                             <td>${r.id}</td>
                             <td>${r.name}</td>
                             <td>${r.time}</td>
-                            <td>${r.accuracy}%</td>
+                            <td>${imageTag}</td>
                         </tr>`;
                     });
 
@@ -145,8 +147,8 @@
 
         // ✅ Attach Event Listeners for Filters
         document.getElementById("searchName").addEventListener("input", fetchAttendance);
-        document.getElementById("searchDate").addEventListener("change", fetchAttendance);
-        document.getElementById("searchAccuracy").addEventListener("change", fetchAttendance);
+        document.getElementById("fromDate").addEventListener("change", fetchAttendance);
+        document.getElementById("toDate").addEventListener("change", fetchAttendance);
     </script>
 
 </body>

@@ -3,9 +3,9 @@ import os
 import numpy as np
 import torch
 import mediapipe as mp
-import psycopg2
-import threading  # ✅ Allows Flask & OpenCV to run together
-import signal  # ✅ Captures CTRL+C to stop Flask & OpenCV
+import base64
+import threading  
+import signal  
 from datetime import datetime
 from ultralytics import YOLO
 from huggingface_hub import hf_hub_download
@@ -13,21 +13,24 @@ from torchvision.transforms import ToTensor, Resize
 from PIL import Image
 from facenet_pytorch import InceptionResnetV1
 from torch.nn.functional import cosine_similarity
-from flask import Flask, render_template
-from database import fetch_attendance, insert_attendance 
 from flask import Flask, render_template, jsonify
-from database import fetch_attendance # ✅ Import insert_attendance
+from database import fetch_attendance, insert_attendance  
+import time
 
-app = Flask(__name__)  # Initialize Flask
-flask_thread = None  # Global variable for the Flask thread
+app = Flask(__name__)  
+flask_thread = None  
+
+# ✅ Ensure 'captured_images' directory exists
+IMAGE_SAVE_PATH = "captured_images"
+os.makedirs(IMAGE_SAVE_PATH, exist_ok=True)
 
 class FaceRecognitionSystem:
     def __init__(self, input_folder):
         """Initialize the face recognition system with models and reference images."""
         self.input_folder = input_folder
-        self.running = True  # ✅ Ensures graceful shutdown
+        self.running = True  
+        self.captured_images = set()  
 
-        # ✅ Define transformations before calling load_reference_images
         self.resize_transform = Resize((160, 160))
         self.to_tensor = ToTensor()
 
@@ -36,7 +39,7 @@ class FaceRecognitionSystem:
         self.face_mesh = mp.solutions.face_mesh.FaceMesh(refine_landmarks=True)
 
         self.last_detected_person = None
-        self.person_in_frame = False  # ✅ Tracks if a person is in the frame
+        self.person_in_frame = False  
 
     def load_models(self):
         """Load YOLO and FaceNet models."""
@@ -55,9 +58,7 @@ class FaceRecognitionSystem:
 
                 image = Image.open(image_path).convert("RGB")
                 image_tensor = self.to_tensor(self.resize_transform(image)).unsqueeze(0)
-
-                # Normalize for FaceNet
-                image_tensor = (image_tensor - 0.5) / 0.5
+                image_tensor = (image_tensor - 0.5) / 0.5  
 
                 with torch.no_grad():
                     embedding = self.facenet(image_tensor)
@@ -74,10 +75,27 @@ class FaceRecognitionSystem:
         results = self.yolo_model(pil_frame)
         return results, frame_rgb
 
+    def save_image(self, face_img, person_name):
+
+        if person_name in self.captured_images:
+            return None  
+        time.sleep(1) 
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        image_filename = f"{IMAGE_SAVE_PATH}/{timestamp}_{person_name}.jpg"
+
+        # Convert RGB to BGR for OpenCV and save image
+        cv2.imwrite(image_filename, cv2.cvtColor(face_img, cv2.COLOR_RGB2BGR))
+
+        print(f"📸 Image saved: {image_filename}")
+        
+        self.captured_images.add(person_name)
+        
+        return image_filename
+
     def recognize_face(self, detected_face):
-        """Compare detected face with stored embeddings."""
+        """Compare detected face with stored embeddings and save image."""
         detected_tensor = self.to_tensor(self.resize_transform(Image.fromarray(detected_face))).unsqueeze(0)
-        detected_tensor = (detected_tensor - 0.5) / 0.5
+        detected_tensor = (detected_tensor - 0.5) / 0.5  
 
         with torch.no_grad():
             detected_embedding = self.facenet(detected_tensor)
@@ -93,17 +111,19 @@ class FaceRecognitionSystem:
                 best_score = similarity
                 best_match = person_name
 
-        # ✅ Store Matched Data
-        self.dataMatch = {
-            "best_match": best_match,
-            "name": best_match if best_match != "Unknown" else "No Match",
-            "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "accuracy": round(best_score * 100, 2),
-        }
+        image_path = self.save_image(detected_face, best_match)  
 
-        print(f"🔍 Best Match: {best_match}, Accuracy: {best_score:.2f}%, Time: {self.dataMatch['time']}")
+        if image_path:
+            try:
+                with open(image_path, "rb") as img_file:
+                    image_binary = img_file.read()  
+                insert_attendance(best_match, round(best_score * 100, 2), image_binary)
+            except Exception as e:
+                print(f"❌ Error saving attendance: {e}")
 
-        return best_match, best_score
+        print(f"🔍 Best Match: {best_match}, Accuracy: {best_score:.2f}%, Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
+        return best_match, best_score, image_path
 
     def run(self):
         """Main function to run real-time face recognition system."""
@@ -113,7 +133,7 @@ class FaceRecognitionSystem:
             print("❌ Error: Could not open webcam. Check your camera settings.")
             return
 
-        while self.running:  # ✅ Loop will exit when `CTRL+C` is pressed
+        while self.running:  
             ret, frame = cap.read()
             if not ret:
                 print("❌ Error: Could not capture frame from webcam.")
@@ -127,27 +147,22 @@ class FaceRecognitionSystem:
                     x1, y1, x2, y2 = map(int, box[:4])
                     detected_face = frame_rgb[y1:y2, x1:x2]
 
-                    # Face recognition
-                    best_match, best_score = self.recognize_face(detected_face)
+                    best_match, best_score, image_path = self.recognize_face(detected_face)
                     face_found = True
 
-                    # ✅ Post attendance if a new person enters
                     if best_match != "Unknown" and not self.person_in_frame:
-                        print(f"✅ Recording Attendance: {best_match} at {self.dataMatch['time']}")
-                        insert_attendance(best_match, self.dataMatch["accuracy"])  # ✅ Insert Data into Database
-                        self.person_in_frame = True  # ✅ Mark as "in frame"
-                        self.last_detected_person = best_match  # ✅ Track last person
+                        print(f"✅ Recording Attendance: {best_match} at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                        self.person_in_frame = True  
+                        self.last_detected_person = best_match  
 
-                    # ✅ Draw rectangle around face
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
                     cv2.putText(frame, best_match, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
             if not face_found:
                 if self.person_in_frame:
                     print("👀 Person left the frame. Resetting detection.")
-                self.person_in_frame = False  # ✅ Reset when no face is found
+                self.person_in_frame = False  
 
-            # ✅ Keep Webcam Running and Show Frame
             cv2.imshow("Face Recognition", frame)
 
             key = cv2.waitKey(1)
@@ -158,26 +173,35 @@ class FaceRecognitionSystem:
         cap.release()
         cv2.destroyAllWindows()
 
-
 @app.route("/")
 def index():
     """Render the attendance table."""
-    records = fetch_attendance()  # ✅ Fetch attendance records
-    return render_template("index2.html", records=records)  # ✅ Render template with data
+    records = fetch_attendance()  
+    return render_template("index2.html", records=records)  
+
+@app.route("/get_attendance")
+def get_attendance():
+    """Fetch latest attendance records and return them as JSON with Base64 images."""
+    try:
+        records = fetch_attendance()
+        
+        for record in records:
+            if record["image"]:  
+                record["image"] = base64.b64encode(record["image"]).decode("utf-8")  # ✅ Convert BYTEA to Base64
+            else:
+                record["image"] = None  # ✅ Handle cases where no image exists
+
+        return jsonify({"attendance": records})
+    except Exception as e:
+        print(f"❌ Error fetching attendance: {e}")
+        return jsonify({"error": str(e)})
 
 
 def signal_handler(sig, frame):
     """Handle CTRL+C (SIGINT) to terminate Flask and OpenCV properly."""
     print("\n🛑 Stopping Face Recognition & Flask Server...")
-    face_recognition.running = False  # ✅ Stop OpenCV loop
-    os._exit(0)  # ✅ Force terminate all threads
-
-
-@app.route("/get_attendance")
-def get_attendance():
-    """Fetch latest attendance records and return them for auto-refresh."""
-    records = fetch_attendance()  # ✅ Fetch latest records
-    return jsonify({"attendance": records})  # ✅ Return records in JSON format
+    face_recognition.running = False  
+    os._exit(0)
 
 
 
@@ -185,12 +209,9 @@ if __name__ == "__main__":
     input_folder = r"C:\Warning\Projects\YoloFaceNet\data"
     face_recognition = FaceRecognitionSystem(input_folder)
 
-    # ✅ Capture CTRL+C and stop everything
     signal.signal(signal.SIGINT, signal_handler)
 
-    # ✅ Run Flask in a separate thread (Daemon mode)
     flask_thread = threading.Thread(target=lambda: app.run(debug=True, host="0.0.0.0", port=5000, use_reloader=False), daemon=True)
     flask_thread.start()
 
-    # ✅ Run Face Recognition
     face_recognition.run()
