@@ -26,9 +26,6 @@ Attendance Logging:
   - Recognized person’s name and timestamp are saved to PostgreSQL.    
   - Only logs attendance when a new person enters the frame.    
  
-Web Interface:  
-  - Flask app shows attendance logs at http://localhost:5000/  
-  - Auto-refresh supported via /get_attendance route.  
 
 
 ---
