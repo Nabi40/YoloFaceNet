@@ -89,7 +89,7 @@ class FaceRecognitionSystem:
             similarity = cosine_similarity(ref_embedding, detected_embedding).item()
             similarity = max(0.0, similarity)
 
-            if similarity > best_score and similarity > 0.5:
+            if similarity > best_score and similarity > 0.70:
                 best_score = similarity
                 best_match = person_name
 
