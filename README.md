@@ -19,7 +19,7 @@ YOLO Face Detection:
 Face Recognition:  
   - Each face is passed to FaceNet for embedding.   
   - Compare embedding with reference images using cosine similarity.    
-  - If similarity > 0.5, the person is recognized.  
+  - If similarity > 0.70, the person is recognized.  
 
     
 Attendance Logging:    
